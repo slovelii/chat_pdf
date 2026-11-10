@@ -5,87 +5,129 @@ import streamlit as st
 from pypdf import PdfReader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import ChatOpenAI
-from langchain_community.vectorstores import FAISS
-from langchain_openai import OpenAIEmbeddings
 
 # ─────────────────────────────────────────────
 # CONFIGURACIÓN DE PÁGINA
 # ─────────────────────────────────────────────
 st.set_page_config(
-    page_title="Aula Virtual — Profesor IA",
-    page_icon="👨‍🏫",
+    page_title="El Salón de Clases Interactivo 🏫✏️",
+    page_icon="🎒",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # ─────────────────────────────────────────────
-# ESTILOS CSS (ESTÉTICA DE PIZARRA Y CLASE)
+# ESTILOS CSS: SALÓN DE CLASES VIBRANTE Y COLORIDO
 # ─────────────────────────────────────────────
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&family=Quicksand:wght@500;700&display=swap');
 
     html, body, [class*="css"] {
-        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-family: 'Quicksand', sans-serif !important;
     }
 
+    /* Fondo general estilo pared de aula moderna (Azul Enérgico) */
     .stApp {
-        background-color: #3b4d2e !important;
+        background-color: #1a2b4c !important;
+        background-image: radial-gradient(#273d6b 15%, transparent 16%), radial-gradient(#273d6b 15%, transparent 16%);
+        background-size: 60px 60px;
+        background-position: 0 0, 30px 30px;
     }
 
-    /* Sidebar */
+    /* Barra lateral estilo casillero escolar (Amarillo Vibrante) */
     [data-testid="stSidebar"] {
-        background-color: #93a67d !important;
-        border-right: 1px solid #bce5cc;
+        background: linear-gradient(180deg, #ffde59 0%, #ff914d 100%) !important;
+        border-right: 4px solid #ffffff;
     }
     
     [data-testid="stSidebar"] * {
-        color: #000000 !important;
+        color: #1a2b4c !important;
+        font-weight: 700 !important;
     }
 
-    /* Estilo Pizarra / Contenedor de Clase */
-    .classroom-card {
-        background: #242c1d !important;
-        border: 2px solid #5a7346;
+    /* Estilo Pizarra del Profesor */
+    .pizarra-card {
+        background: #132210 !important;
+        border: 6px solid #8B5A2B; /* Marco de madera */
         border-radius: 16px;
-        padding: 24px;
-        margin-bottom: 20px;
-        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+        padding: 30px;
+        margin-bottom: 25px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
         color: #FFFFFF !important;
     }
 
-    /* Burbujas de diálogo del Profesor */
-    .prof-bubble {
-        background: #2e3b24;
-        border-left: 5px solid #00D18F;
-        padding: 16px;
-        border-radius: 0 12px 12px 0;
-        margin-bottom: 15px;
-        color: #ffffff;
+    .pizarra-titulo {
+        font-family: 'Fredoka', cursive !important;
+        color: #ffde59 !important;
+        font-size: 2.2rem;
+        text-align: center;
+        margin-bottom: 10px;
+        text-shadow: 2px 2px #000000;
     }
 
-    /* Burbujas del Estudiante */
-    .student-bubble {
-        background: #38482d;
-        border-right: 5px solid #ffcc00;
-        padding: 16px;
-        border-radius: 12px 0 0 12px;
+    /* Burbujas de diálogo estilo cuaderno escolar */
+    .profesor-habla {
+        background: #ffffff;
+        border: 3px solid #ffde59;
+        border-radius: 20px;
+        padding: 20px;
         margin-bottom: 15px;
-        color: #ffffff;
+        color: #1a2b4c !important;
+        font-size: 1.1rem;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+
+    .estudiante-habla {
+        background: #ff914d;
+        border: 3px solid #ffffff;
+        border-radius: 20px;
+        padding: 20px;
+        margin-bottom: 15px;
+        color: #ffffff !important;
+        font-size: 1.1rem;
         text-align: right;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     }
 
-    p, label, span {
-        color: #E0E0E0 !important;
+    /* Inputs y botones vibrantes */
+    .stTextInput input, .stTextArea textarea {
+        background-color: #ffffff !important;
+        color: #1a2b4c !important;
+        border-radius: 12px !important;
+        border: 3px solid #ffde59 !important;
+        font-weight: bold !important;
+    }
+
+    .stButton button {
+        background: #00bf63 !important;
+        color: white !important;
+        font-family: 'Fredoka', cursive !important;
+        font-size: 1.2rem !important;
+        border-radius: 14px !important;
+        border: 3px solid #ffffff !important;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        transition: all 0.2s ease;
+    }
+
+    .stButton button:hover {
+        background: #ffde59 !important;
+        color: #1a2b4c !important;
+        transform: scale(1.02);
+    }
+
+    h1, h2, h3, h4 {
+        font-family: 'Fredoka', cursive !important;
+        color: #ffffff !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# GESTIÓN DEL ESTADO DE LA CLASE (SESSION STATE)
+# ESTADO DE LA CLASE EN VIVO
 # ─────────────────────────────────────────────
 if "historial_clase" not in st.session_state:
-    st.session_state.historial_clase = [] # Lista de tuplas ("profesor"/"estudiante", texto)
+    st.session_state.historial_clase = []
 if "preguntas_examen" not in st.session_state:
     st.session_state.preguntas_examen = []
 if "indice_pregunta" not in st.session_state:
@@ -94,37 +136,35 @@ if "clase_iniciada" not in st.session_state:
     st.session_state.clase_iniciada = False
 
 # ─────────────────────────────────────────────
-# BARRA LATERAL (CONTROL DEL PROFESOR)
+# BARRA LATERAL: ESCRITORIO DEL PROFESOR / MOCHILA
 # ─────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("<h3 style='color:#000000 !important; font-weight:800;'>🏫 Dirección del Colegio</h3>", unsafe_allow_html=True)
-    st.markdown("<p style='color:#222222 !important; font-size:0.9rem;'>Prepara tu salón de clases cargando los apuntes.</p>", unsafe_allow_html=True)
-    st.divider()
+    st.markdown("<h2 style='text-align: center; color: #1a2b4c;'>🎒 Mochila Escolar</h2>", unsafe_allow_html=True)
+    st.markdown("---")
+    
+    st.markdown("🔑 **Pase de Entrada (OpenAI API):**")
+    api_key = st.text_input("Clave API", type="password", placeholder="sk-...", label_visibility="collapsed")
 
-    st.markdown("<b style='color:#000000 !important;'>🔑 Credenciales de Acceso</b>", unsafe_allow_html=True)
-    api_key = st.text_input("Clave API OpenAI", type="password", placeholder="sk-...")
-
-    st.divider()
-    st.markdown("<b style='color:#000000 !important;'>📄 Material de Estudio (PDF)</b>", unsafe_allow_html=True)
-    pdf_subido = st.file_uploader("Sube el PDF de la clase", type="pdf", label_visibility="collapsed")
+    st.markdown("---")
+    st.markdown("📚 **Libro de Texto (PDF):**")
+    pdf_subido = st.file_uploader("Sube tu archivo", type="pdf", label_visibility="collapsed")
 
     if pdf_subido and not st.session_state.clase_iniciada:
-        if st.button("🔔 ¡Comenzar la Clase!", use_container_width=True):
+        if st.button("🔔 ¡Tocar el Timbre!", use_container_width=True):
             if not api_key:
-                st.error("Por favor ingresa tu clave de OpenAI primero.")
+                st.error("¡Falta la llave de acceso en la mochila!")
             else:
-                with st.spinner("El Profesor está leyendo el documento y preparando la lección..."):
-                    # Extraer texto
+                with st.spinner("🍎 El profesor está preparando la pizarra..."):
                     reader = PdfReader(io.BytesIO(pdf_subido.getvalue()))
                     texto_pdf = "\n".join((pagina.extract_text() or "") for pagina in reader.pages)
                     
-                    # Generar preguntas conversacionales con IA
                     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.4, api_key=api_key)
                     prompt = f"""
-                    Eres un profesor experto, amigable pero exigente. A partir del siguiente texto, genera una lista de 4 preguntas de examen abiertas y estimulantes para evaluar a un estudiante en forma de diálogo.
+                    Eres un profesor super divertido, dinámico y carismático de una escuela moderna. 
+                    A partir del siguiente texto, genera 4 preguntas de estudio estimulantes y claras para evaluar a un estudiante en forma de un divertido examen oral.
                     Devuelve el resultado ÚNICAMENTE en formato JSON de lista de strings (ejemplo: ["Pregunta 1?", "Pregunta 2?"]):
                     
-                    Texto:
+                    Texto de la clase:
                     {texto_pdf[:10000]}
                     """
                     resp = llm.invoke(prompt)
@@ -135,105 +175,102 @@ with st.sidebar:
                         st.session_state.indice_pregunta = 0
                         st.session_state.historial_clase = []
                         
-                        # Saludo inicial del profesor y primera pregunta
-                        primer_saludo = f"¡Hola! Toma asiento por favor. He leído detenidamente tu documento y hoy seré tu profesor personal. Vamos a ver qué tanto aprendiste. Comencemos con la primera pregunta:\n\n**{preguntas[0]}**"
-                        st.session_state.historial_clase.append(("profesor", primer_saludo))
+                        saludo_profe = f"¡Hola, hola! 🎒 Pasa y toma asiento. He echado un vistazo al documento que trajiste hoy y tengo un par de retos para ti. ¡Empecemos con la pregunta número 1:\n\n✨ **{preguntas[0]}**"
+                        st.session_state.historial_clase.append(("profesor", saludo_profe))
                         st.session_state.clase_iniciada = True
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error al preparar las preguntas: {e}")
+                        st.error(f"¡Rayos! Hubo un problema al leer el documento: {e}")
 
     if st.session_state.clase_iniciada:
-        if st.button("🚪 Cambiar de Tema / Reiniciar Clase", use_container_width=True):
+        if st.button("🧹 Limpiar Pizarra / Salir", use_container_width=True):
             st.session_state.clase_iniciada = False
             st.session_state.historial_clase = []
             st.session_state.preguntas_examen = []
             st.rerun()
 
-    st.divider()
-    st.markdown(f"<p style='color:#333333 !important; font-size:0.75rem;'>Aula Virtual v2.0 - Modo Interactivo</p>", unsafe_allow_html=True)
+    st.markdown("<br><p style='text-align: center; font-size: 0.8rem;'>¡Aprender nunca fue tan divertido! 🎨</p>", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# PANTALLA PRINCIPAL: EL SALÓN DE CLASES
+# PANTALLA PRINCIPAL: EL AULA DE CLASES
 # ─────────────────────────────────────────────
 st.markdown("""
-<div class="classroom-card" style="text-align: center; border-color: #00D18F;">
-    <span style="background-color: #00D18F; color: #000000; font-weight: 800; padding: 4px 14px; border-radius: 20px; font-size: 0.8rem; text-transform: uppercase;">👨‍🏫 Aula Interactiva en Vivo</span>
-    <h1 style="margin: 10px 0 5px 0; color: #FFFFFF !important; font-weight: 800;">Clase Magistral con el Profesor IA</h1>
-    <p style="font-size: 0.95rem; color: #CCCCCC !important; margin: 0;">
-        Responde a las preguntas del profesor en el chat inferior. Él evaluará tu respuesta, te dará retroalimentación y te hará la siguiente pregunta.
+<div class="pizarra-card">
+    <div class="pizarra-titulo">🏫 ESCUELA SECRETA DE IA ✏️</div>
+    <p style="text-align: center; color: #a3ffb1; font-size: 1.1rem; margin: 0;">
+        Bienvenido a tu pupitre. Tu profesor virtual evaluará tus conocimientos lección por lección de forma interactiva. ¡Levanta la mano para responder!
     </p>
 </div>
 """, unsafe_allow_html=True)
 
 if not st.session_state.clase_iniciada:
     st.markdown("""
-    <div class="classroom-card" style="text-align: center; padding: 50px;">
-        <h3 style="color: #00D18F;">🚪 El salón está vacío</h3>
-        <p>Por favor, ingresa tu clave de OpenAI y sube un archivo PDF en la barra lateral izquierda, luego haz clic en <b>"¡Comenzar la Clase!"</b> para que el profesor te reciba.</p>
+    <div class="pizarra-card" style="text-align: center; padding: 50px; background: #1c3218 !important;">
+        <h2 style="color: #ffde59;">🚪 El salón está listo y esperando...</h2>
+        <p style="font-size: 1.2rem; color: #ffffff;">
+            Para comenzar la clase, ingresa tu clave secreta de OpenAI y sube tu PDF de estudio en la <b>Mochila Escolar (barra lateral izquierda)</b>. ¡Luego toca el timbre! 🔔
+        </p>
     </div>
     """, unsafe_allow_html=True)
 else:
-    # Mostrar el pizarron / historial de la conversación
+    # Mostramos la conversación a modo de pizarra interactiva / diálogo de clase
     for rol, mensaje in st.session_state.historial_clase:
         if rol == "profesor":
             st.markdown(f"""
-            <div class="prof-bubble">
-                <b>👨‍🏫 Profesor IA:</b><br>{mensaje}
+            <div class="profesor-habla">
+                <b>👨‍🏫 Profesor Alex:</b><br><br>{mensaje}
             </div>
             """, unsafe_allow_html=True)
         else:
             st.markdown(f"""
-            <div class="student-bubble">
-                <b>🎓 Tú (Estudiante):</b><br>{mensaje}
+            <div class="estudiante-habla">
+                <b>🙋‍♂️ Tú (Estudiante):</b><br><br>{mensaje}
             </div>
             """, unsafe_allow_html=True)
 
-    # Si aún hay preguntas por hacer, mostrar el input de respuesta
     idx_actual = st.session_state.indice_pregunta
     total_preguntas = len(st.session_state.preguntas_examen)
 
     if idx_actual < total_preguntas:
-        with st.form(key="form_respuesta_clase", clear_on_submit=True):
-            respuesta_estudiante = st.text_input("💬 Levanta la mano y responde al profesor:", placeholder="Escribe tu respuesta aquí...")
-            btn_enviar = st.form_submit_button("🙋‍♂️ Responder al Profesor", use_container_width=True)
+        with st.form(key="form_clase_vibrante", clear_on_submit=True):
+            st.markdown("<h4 style='color: #ffde59;'>📝 Turno de participación en clase:</h4>", unsafe_allow_html=True)
+            respuesta_estudiante = st.text_input("Escribe tu respuesta como si hablaras con el profesor:", placeholder="Ej: Pienso que la respuesta principal es...")
+            btn_enviar = st.form_submit_button("🙋‍♂️ Levantar la Mano y Responder", use_container_width=True)
 
             if btn_enviar and respuesta_estudiante.strip():
-                # Agregar respuesta del estudiante al historial
                 st.session_state.historial_clase.append(("estudiante", respuesta_estudiante))
                 
-                # Evaluar con IA
                 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, api_key=api_key)
                 pregunta_hecha = st.session_state.preguntas_examen[idx_actual]
                 
                 prompt_evaluacion = f"""
-                Estás actuando como un profesor en un aula evaluando a un estudiante.
-                Pregunta que hiciste: "{pregunta_hecha}"
-                Respuesta del estudiante: "{respuesta_estudiante}"
+                Estás actuando como un profesor súper amigable, carismático y dinámico en un salón de clases colorido.
+                Pregunta de examen que hiciste al alumno: "{pregunta_hecha}"
+                Lo que respondió el alumno: "{respuesta_estudiante}"
                 
-                Evalúa su respuesta de forma constructiva (indícale si está bien, qué le faltó, corrígele si hay errores).
-                Sé conversacional, cercano y motivador. 
+                Evalúa su respuesta de forma divertida, dale retroalimentación (10 partes de aliento, corrección si hace falta) y explícale con buena onda.
                 """
                 
-                with st.spinner("El Profesor está evaluando tu respuesta..."):
+                with st.spinner("🍎 El profesor está revisando tu libreta..."):
                     evaluacion = llm.invoke(prompt_evaluacion).content
                 
-                # Avanzar índice
                 st.session_state.indice_pregunta += 1
                 nuevo_idx = st.session_state.indice_pregunta
                 
                 if nuevo_idx < total_preguntas:
                     siguiente_pregunta = st.session_state.preguntas_examen[nuevo_idx]
-                    respuesta_profesor = f"{evaluacion}\n\n--- \nPasemos a la siguiente cuestión:\n\n**{siguiente_pregunta}**"
+                    respuesta_profesor = f"{evaluacion}\n\n--- \n¡Muy bien apuntado! Pasemos al siguiente desafío en la pizarra:\n\n✨ **{siguiente_pregunta}**"
                 else:
-                    respuesta_profesor = f"{evaluacion}\n\n🎉 **¡Clase terminada!** Has respondido todas las preguntas de la lección. ¡Excelente esfuerzo hoy, puedes descansar o reiniciar con otro documento!"
+                    respuesta_profesor = f"{evaluacion}\n\n🏆 **¡Increíble trabajo!** Has completado todas las preguntas de la lección de hoy. ¡Te haz ganado una estrella dorada en conducta y calificaciones! ⭐"
                 
                 st.session_state.historial_clase.append(("profesor", respuesta_profesor))
                 st.rerun()
     else:
         st.markdown("""
-        <div class="classroom-card" style="text-align: center; background: #2e3b24 !important; border-color: #00D18F;">
-            <h3 style="color: #00D18F;">🌟 ¡Lección Concluida con Éxito!</h3>
-            <p>Has completado todo el cuestionario oral del profesor. Usa el botón de la barra lateral si deseas estudiar otro documento.</p>
+        <div class="pizarra-card" style="text-align: center; background: #1c3218 !important; border-color: #00bf63;">
+            <h2 style="color: #00bf63;">🌟 ¡Clase Concluida con Honores!</h2>
+            <p style="font-size: 1.1rem; color: #ffffff;">
+                Has terminado todo el cuestionario oral del día de hoy. Puedes guardar tus cosas y recargar la página o cambiar de documento en la mochila escolar cuando gustes.
+            </p>
         </div>
         """, unsafe_allow_html=True)
