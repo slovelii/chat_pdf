@@ -1,8 +1,7 @@
 import io
+import json
 import platform
-
 import streamlit as st
-from PIL import Image
 from pypdf import PdfReader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
@@ -12,14 +11,14 @@ from langchain_community.vectorstores import FAISS
 # CONFIGURACIÓN DE PÁGINA
 # ─────────────────────────────────────────────
 st.set_page_config(
-    page_title="Oráculo de Documentos — RAG IA",
-    page_icon="🍃",
+    page_title="QuizMaster IA — Tu Entrenador de Exámenes",
+    page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # ─────────────────────────────────────────────
-# ESTILOS CSS PERSONALIZADOS (ESTÉTICA NATURAL & MENTA)
+# ESTILOS CSS PERSONALIZADOS (ESTÉTICA DE ESTUDIO / MENTA)
 # ─────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -44,7 +43,7 @@ st.markdown("""
     }
 
     /* Tarjetas de Contenido */
-    .main-card {
+    .study-card {
         background: #29331F !important;
         border: 1px solid #3E4D2F;
         border-radius: 16px;
@@ -79,160 +78,195 @@ st.markdown("""
         letter-spacing: 0.5px;
     }
 
-    /* Ajustes generales de texto legible sobre fondo oscuro */
     p, label, span {
-        color: #E0E0E0;
+        color: #E0E0E0 !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
+# ─────────────────────────────────────────────
+# GESTIÓN DEL ESTADO DE LA SESIÓN (SESSION STATE)
+# ─────────────────────────────────────────────
+if "quiz_preguntas" not in st.session_state:
+    st.session_state.quiz_preguntas = []
+if "respuestas_usuario" not in st.session_state:
+    st.session_state.respuestas_usuario = {}
+if "quiz_enviado" not in st.session_state:
+    st.session_state.quiz_enviado = False
 
 # ─────────────────────────────────────────────
 # BARRA LATERAL (SIDEBAR)
 # ─────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("<h3 style='color:#000000 !important; font-weight:800;'>🍃 Panel de Control</h3>", unsafe_allow_html=True)
-    st.markdown("<p style='color:#222222 !important; font-size:0.9rem;'>Configura tus credenciales y carga tu archivo de lectura.</p>", unsafe_allow_html=True)
+    st.markdown("<h3 style='color:#000000 !important; font-weight:800;'>🎯 Panel de Estudio</h3>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#222222 !important; font-size:0.9rem;'>Sube tu material de lectura y prepárate para el examen.</p>", unsafe_allow_html=True)
     st.divider()
 
-    # Clave de API
     st.markdown("<b style='color:#000000 !important;'>🔑 Credenciales</b>", unsafe_allow_html=True)
-    api_key = st.text_input("Ingresa tu Clave de OpenAI", type="password", placeholder="sk-...")
+    api_key = st.text_input("Clave API OpenAI", type="password", placeholder="sk-...")
 
     st.divider()
     
-    # Carga del PDF
-    st.markdown("<b style='color:#000000 !important;'>📄 Archivo de Conocimiento</b>", unsafe_allow_html=True)
-    pdf = st.file_uploader("Carga el archivo PDF", type="pdf", label_visibility="collapsed")
+    st.markdown("<b style='color:#000000 !important;'>📄 Tu Apunte o PDF</b>", unsafe_allow_html=True)
+    pdf = st.file_uploader("Sube el PDF de estudio", type="pdf", label_visibility="collapsed")
+
+    if pdf and st.button("🔄 Reiniciar / Generar Nuevo Quiz", use_container_width=True):
+        st.session_state.quiz_preguntas = []
+        st.session_state.respuestas_usuario = {}
+        st.session_state.quiz_enviado = False
+        st.rerun()
 
     st.divider()
-    st.markdown(f"<p style='color:#444444 !important; font-size:0.75rem;'>Entorno Python: {platform.python_version()}</p>", unsafe_allow_html=True)
-
+    st.markdown(f"<p style='color:#444444 !important; font-size:0.75rem;'>QuizMaster Engine v2.0</p>", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# HERO BANNER / ENCABEZADO PRINCIPAL
+# HERO BANNER / ENCABEZADO
 # ─────────────────────────────────────────────
 st.markdown("""
 <div class="hero-card">
-    <span class="badge-tag">✨ Inteligencia Artificial & RAG</span>
-    <h1 style="margin: 4px 0 10px 0; color: #FFFFFF !important; font-weight: 800;">Oráculo Inteligente de Documentos PDF 💬</h1>
+    <span class="badge-tag">🎓 Estudio Activo & Gamificado</span>
+    <h1 style="margin: 4px 0 10px 0; color: #FFFFFF !important; font-weight: 800;">QuizMaster: Tu Entrenador de Exámenes 🎯</h1>
     <p style="font-size: 1.05rem; color: #CCCCCC !important; margin-bottom: 0px; line-height: 1.5;">
-        Sube cualquier documento y conversa directamente con su contenido mediante recuperación semántica avanzada y modelos de lenguaje de última generación.
+        Sube las lecturas de tu clase. La inteligencia artificial creará un simulacro de examen personalizado para evaluar tus conocimientos antes de la prueba oficial.
     </p>
 </div>
 """, unsafe_allow_html=True)
 
-
 # ─────────────────────────────────────────────
-# FUNCIÓN DE PROCESAMIENTO CON CACHÉ
+# FUNCIONES DE PROCESAMIENTO Y GENERACIÓN DE QUIZ
 # ─────────────────────────────────────────────
-@st.cache_resource(show_spinner="Creando la base de conocimiento...")
-def crear_base_conocimiento(pdf_bytes: bytes, api_key: str):
-    """Extrae el texto, lo divide en fragmentos y crea el índice FAISS."""
+@st.cache_resource(show_spinner="Procesando documento...")
+def extraer_texto_pdf(pdf_bytes: bytes):
     reader = PdfReader(io.BytesIO(pdf_bytes))
     texto = "\n".join((pagina.extract_text() or "") for pagina in reader.pages)
+    return texto
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    fragmentos = splitter.split_text(texto)
-    if not fragmentos:
-        return None, len(texto), 0
+def generar_preguntas_quiz(texto: str, api_key: str):
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, api_key=api_key)
+    
+    prompt = f"""
+    A partir del siguiente texto de estudio, genera exactamente 5 preguntas de opción múltiple diseñadas para evaluar a un estudiante.
+    Devuelve la respuesta ÚNICAMENTE en formato JSON válido, sin bloques de código markdown adicionales (nada de ```json), con la siguiente estructura de lista:
+    [
+      {{
+        "pregunta": "Texto de la pregunta",
+        "opciones": ["Opción A", "Opción B", "Opción C", "Opción D"],
+        "respuesta_correcta": "Opción exacta que es correcta",
+        "explicacion": "Breve explicación de por qué es la respuesta correcta"
+      }}
+    ]
 
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small", api_key=api_key)
-    base = FAISS.from_texts(fragmentos, embeddings)
-    return base, len(texto), len(fragmentos)
-
+    Texto de estudio:
+    {texto[:12000]}
+    """
+    
+    respuesta = llm.invoke(prompt)
+    try:
+        # Limpieza por si el modelo incluye marcas de código
+        texto_limpio = respuesta.content.replace("```json", "").replace("```", "").strip()
+        return json.loads(texto_limpio)
+    except Exception:
+        return []
 
 # ─────────────────────────────────────────────
-# LÓGICA PRINCIPAL DE LA APLICACIÓN
+# LÓGICA PRINCIPAL DE LA VISTA
 # ─────────────────────────────────────────────
 if not api_key:
     st.markdown("""
-    <div class="main-card" style="text-align: center; padding: 40px;">
-        <h3 style="color: #00D18F !important;">🔒 Esperando Clave de API</h3>
-        <p>Por favor ingresa tu clave secreta de OpenAI en la barra lateral izquierda para habilitar el sistema.</p>
+    <div class="study-card" style="text-align: center; padding: 40px;">
+        <h3 style="color: #00D18F !important;">🔒 Ingresa tu Clave de OpenAI</h3>
+        <p>Escribe tu clave en la barra lateral para activar tu simulador de exámenes.</p>
     </div>
     """, unsafe_allow_html=True)
 
 elif pdf is None:
     st.markdown("""
-    <div class="main-card" style="text-align: center; padding: 40px;">
-        <h3 style="color: #00D18F !important;">📂 Carga un Documento PDF</h3>
-        <p>Selecciona o arrastra un archivo PDF en la barra lateral para comenzar la magia del análisis inteligente.</p>
+    <div class="study-card" style="text-align: center; padding: 40px;">
+        <h3 style="color: #00D18F !important;">📂 Sube tu PDF de Estudio</h3>
+        <p>Arrastra tu guía, lectura o documento de clase en la barra lateral para generar tu quiz personalizado.</p>
     </div>
     """, unsafe_allow_html=True)
 
 else:
     try:
-        with st.spinner("🧠 Analizando estructura e indexando fragmentos..."):
-            base, n_caracteres, n_fragmentos = crear_base_conocimiento(pdf.getvalue(), api_key)
-
-        if base is None:
-            st.error("No se pudo extraer texto del PDF (¿es un PDF escaneado sin OCR?).")
+        texto_pdf = extraer_texto_pdf(pdf.getvalue())
+        
+        if not texto_pdf.strip():
+            st.error("El PDF no contiene texto legible.")
             st.stop()
 
-        # Métricas resumidas en tarjetas limpias
-        col_m1, col_m2 = st.columns(2)
-        with col_m1:
-            st.markdown(f"""
-            <div style="background: #29331F; padding: 15px; border-radius: 12px; border: 1px solid #3E4D2F; text-align: center;">
-                <span style="font-size: 0.85rem; color: #00D18F; font-weight: 700;">TOTAL CARACTERES</span>
-                <h3 style="color: #FFFFFF; margin: 5px 0 0 0;">{n_caracteres:,}</h3>
-            </div>
-            """, unsafe_allow_html=True)
-        with col_m2:
-            st.markdown(f"""
-            <div style="background: #29331F; padding: 15px; border-radius: 12px; border: 1px solid #3E4D2F; text-align: center;">
-                <span style="font-size: 0.85rem; color: #00D18F; font-weight: 700;">FRAGMENTOS INDEXADOS</span>
-                <h3 style="color: #FFFFFF; margin: 5px 0 0 0;">{n_fragmentos}</h3>
-            </div>
-            """, unsafe_allow_html=True)
+        # Generar preguntas si aún no existen en la sesión
+        if not st.session_state.quiz_preguntas:
+            with st.spinner("🧠 Leyendo apuntes y diseñando el examen simulado..."):
+                st.session_state.quiz_preguntas = generar_preguntas_quiz(texto_pdf, api_key)
+        
+        preguntas = st.session_state.quiz_preguntas
 
-        st.markdown("<br>", unsafe_allow_html=True)
+        if not preguntas:
+            st.error("No se pudieron generar preguntas a partir de este documento. Intenta con otro archivo.")
+            st.stop()
 
-        # Sección de Preguntas
+        # Interfaz del Examen
         st.markdown("""
-        <div class="main-card">
-            <h3 style="color: #00D18F !important; margin-top:0;">🤖 Conversa con tu PDF</h3>
-            <p>Escribe cualquier duda o concepto que desees consultar dentro de las páginas del documento.</p>
+        <div class="study-card">
+            <h3 style="color: #00D18F !important; margin-top:0;">📝 Simulacro de Examen Activo</h3>
+            <p>Responde las siguientes preguntas basadas en tu documento. Al finalizar, califica tu desempeño.</p>
         </div>
         """, unsafe_allow_html=True)
 
-        pregunta = st.text_area(" ", placeholder="Ej: ¿Cuáles son las conclusiones principales del documento?", label_visibility="collapsed")
+        with st.form("form_quiz"):
+            for i, q in enumerate(preguntas):
+                st.markdown(f"#### **Pregunta {i+1}:** {q['pregunta']}")
+                
+                # Widget de selección
+                opcion_elegida = st.radio(
+                    f"Selecciona una opción (P{i+1})",
+                    q['opciones'],
+                    key=f"q_{i}",
+                    label_visibility="collapsed"
+                )
+                st.session_state.respuestas_usuario[i] = opcion_elegida
+                st.markdown("<hr style='border-color: #3E4D2F;'>", unsafe_allow_html=True)
 
-        if pregunta:
-            # 1. Recuperación: fragmentos más parecidos a la pregunta
-            docs = base.similarity_search(pregunta, k=4)
-            contexto = "\n\n---\n\n".join(d.page_content for d in docs)
+            enviar_quiz = st.form_submit_button("🚀 Evaluar Mis Respuestas", use_container_width=True)
 
-            # 2. Generación: el modelo responde usando solo ese contexto
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=api_key)
-            mensajes = [
-                ("system",
-                 "Responde la pregunta usando únicamente el contexto proporcionado. "
-                 "Si la respuesta no está en el contexto, dilo claramente. Responde en español."),
-                ("human", f"Contexto:\n{contexto}\n\nPregunta: {pregunta}"),
-            ]
+        if enviar_quiz:
+            st.session_state.quiz_enviado = True
+
+        # Mostrar resultados si ya se envió el quiz
+        if st.session_state.quiz_enviado:
+            puntaje = 0
+            st.markdown("---")
+            st.markdown("<h2 style='color: #00D18F;'>📊 Resultados de tu Evaluación</h2>", unsafe_allow_html=True)
             
-            with st.spinner("✨ El Oráculo está redactando la respuesta..."):
-                respuesta = llm.invoke(mensajes)
+            for i, q in enumerate(preguntas):
+                resp_usuario = st.session_state.respuestas_usuario.get(i)
+                es_correcta = (resp_usuario == q['respuesta_correcta'])
+                
+                if es_correcta:
+                    puntaje += 1
+                    icono = "✅"
+                    color_borde = "#00D18F"
+                else:
+                    icono = "❌"
+                    color_borde = "#FF6B6B"
 
-            # Tarjeta de Respuesta
-            st.markdown(f"""
-            <div class="main-card" style="border-left: 5px solid #00D18F;">
-                <h4 style="color: #00D18F !important; margin-top:0;">💡 Respuesta del Oráculo:</h4>
-                <div style="color: #FFFFFF; font-size: 1.05rem; line-height: 1.6;">
-                    {respuesta.content}
+                st.markdown(f"""
+                <div class="study-card" style="border-left: 5px solid {color_borde};">
+                    <p style="font-weight: 700; color: #FFFFFF;">Pregunta {i+1}: {q['pregunta']}</p>
+                    <p>Tu respuesta: <b>{resp_usuario}</b> {icono}</p>
+                    <p>Respuesta correcta: <b>{q['respuesta_correcta']}</b></p>
+                    <p style="font-size: 0.9rem; color: #CCCCCC; font-style: italic;">💡 Explicación: {q['explicacion']}</p>
                 </div>
+                """, unsafe_allow_html=True)
+
+            nota_final = (puntaje / len(preguntas)) * 100
+            st.markdown(f"""
+            <div class="hero-card" style="text-align: center;">
+                <h2>Tu Calificación Final: {puntaje} / {len(preguntas)} ({nota_final}%)</h2>
+                <p>{'🎉 ¡Excelente trabajo, estás listo para el examen!' if nota_final >= 80 else '💡 ¡Buen intento! Repasa los conceptos marcados en rojo antes de la prueba.'}</p>
             </div>
             """, unsafe_allow_html=True)
 
-            # Expansor para los fragmentos de origen
-            with st.expander("🔍 Ver fragmentos recuperados del documento (Contexto RAG)"):
-                for i, d in enumerate(docs, 1):
-                    st.markdown(f"**Fragmento {i}**")
-                    st.code(d.page_content, language="text")
-
     except Exception as e:
-        st.error(f"Error al procesar el PDF: {e}")
-        import traceback
-        st.code(traceback.format_exc())
+        st.error(f"Ocurrió un error al procesar el examen: {e}")
