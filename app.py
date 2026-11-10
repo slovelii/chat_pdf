@@ -4,21 +4,22 @@ import platform
 import streamlit as st
 from pypdf import PdfReader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain_community.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings
 
 # ─────────────────────────────────────────────
 # CONFIGURACIÓN DE PÁGINA
 # ─────────────────────────────────────────────
 st.set_page_config(
-    page_title="QuizMaster IA — Tu Entrenador de Exámenes",
-    page_icon="🎯",
+    page_title="Aula Virtual — Profesor IA",
+    page_icon="👨‍🏫",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # ─────────────────────────────────────────────
-# ESTILOS CSS PERSONALIZADOS (ESTÉTICA DE ESTUDIO / MENTA)
+# ESTILOS CSS (ESTÉTICA DE PIZARRA Y CLASE)
 # ─────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -29,53 +30,49 @@ st.markdown("""
     }
 
     .stApp {
-        background-color: #52663D !important;
+        background-color: #3b4d2e !important;
     }
 
     /* Sidebar */
     [data-testid="stSidebar"] {
-        background-color: #A8BA93 !important;
-        border-right: 1px solid #D1EAD9;
+        background-color: #93a67d !important;
+        border-right: 1px solid #bce5cc;
     }
     
     [data-testid="stSidebar"] * {
         color: #000000 !important;
     }
 
-    /* Tarjetas de Contenido */
-    .study-card {
-        background: #29331F !important;
-        border: 1px solid #3E4D2F;
+    /* Estilo Pizarra / Contenedor de Clase */
+    .classroom-card {
+        background: #242c1d !important;
+        border: 2px solid #5a7346;
         border-radius: 16px;
         padding: 24px;
         margin-bottom: 20px;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
         color: #FFFFFF !important;
     }
 
-    /* Hero Banner */
-    .hero-card {
-        background: linear-gradient(135deg, #29331F 0%, #1E2617 100%);
-        border: 1px solid #00D18F;
-        border-radius: 16px;
-        padding: 32px;
-        margin-bottom: 24px;
-        box-shadow: 0 10px 30px rgba(0, 209, 143, 0.15);
-        color: #FFFFFF !important;
+    /* Burbujas de diálogo del Profesor */
+    .prof-bubble {
+        background: #2e3b24;
+        border-left: 5px solid #00D18F;
+        padding: 16px;
+        border-radius: 0 12px 12px 0;
+        margin-bottom: 15px;
+        color: #ffffff;
     }
 
-    /* Tags / Badges */
-    .badge-tag {
-        background-color: #E2F5EA !important;
-        color: #007A52 !important;
-        font-size: 0.75rem !important;
-        font-weight: 800 !important;
-        padding: 4px 12px;
-        border-radius: 20px;
-        display: inline-block;
-        margin-bottom: 8px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
+    /* Burbujas del Estudiante */
+    .student-bubble {
+        background: #38482d;
+        border-right: 5px solid #ffcc00;
+        padding: 16px;
+        border-radius: 12px 0 0 12px;
+        margin-bottom: 15px;
+        color: #ffffff;
+        text-align: right;
     }
 
     p, label, span {
@@ -85,188 +82,158 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# GESTIÓN DEL ESTADO DE LA SESIÓN (SESSION STATE)
+# GESTIÓN DEL ESTADO DE LA CLASE (SESSION STATE)
 # ─────────────────────────────────────────────
-if "quiz_preguntas" not in st.session_state:
-    st.session_state.quiz_preguntas = []
-if "respuestas_usuario" not in st.session_state:
-    st.session_state.respuestas_usuario = {}
-if "quiz_enviado" not in st.session_state:
-    st.session_state.quiz_enviado = False
+if "historial_clase" not in st.session_state:
+    st.session_state.historial_clase = [] # Lista de tuplas ("profesor"/"estudiante", texto)
+if "preguntas_examen" not in st.session_state:
+    st.session_state.preguntas_examen = []
+if "indice_pregunta" not in st.session_state:
+    st.session_state.indice_pregunta = 0
+if "clase_iniciada" not in st.session_state:
+    st.session_state.clase_iniciada = False
 
 # ─────────────────────────────────────────────
-# BARRA LATERAL (SIDEBAR)
+# BARRA LATERAL (CONTROL DEL PROFESOR)
 # ─────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("<h3 style='color:#000000 !important; font-weight:800;'>🎯 Panel de Estudio</h3>", unsafe_allow_html=True)
-    st.markdown("<p style='color:#222222 !important; font-size:0.9rem;'>Sube tu material de lectura y prepárate para el examen.</p>", unsafe_allow_html=True)
+    st.markdown("<h3 style='color:#000000 !important; font-weight:800;'>🏫 Dirección del Colegio</h3>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#222222 !important; font-size:0.9rem;'>Prepara tu salón de clases cargando los apuntes.</p>", unsafe_allow_html=True)
     st.divider()
 
-    st.markdown("<b style='color:#000000 !important;'>🔑 Credenciales</b>", unsafe_allow_html=True)
+    st.markdown("<b style='color:#000000 !important;'>🔑 Credenciales de Acceso</b>", unsafe_allow_html=True)
     api_key = st.text_input("Clave API OpenAI", type="password", placeholder="sk-...")
 
     st.divider()
-    
-    st.markdown("<b style='color:#000000 !important;'>📄 Tu Apunte o PDF</b>", unsafe_allow_html=True)
-    pdf = st.file_uploader("Sube el PDF de estudio", type="pdf", label_visibility="collapsed")
+    st.markdown("<b style='color:#000000 !important;'>📄 Material de Estudio (PDF)</b>", unsafe_allow_html=True)
+    pdf_subido = st.file_uploader("Sube el PDF de la clase", type="pdf", label_visibility="collapsed")
 
-    if pdf and st.button("🔄 Reiniciar / Generar Nuevo Quiz", use_container_width=True):
-        st.session_state.quiz_preguntas = []
-        st.session_state.respuestas_usuario = {}
-        st.session_state.quiz_enviado = False
-        st.rerun()
+    if pdf_subido and not st.session_state.clase_iniciada:
+        if st.button("🔔 ¡Comenzar la Clase!", use_container_width=True):
+            if not api_key:
+                st.error("Por favor ingresa tu clave de OpenAI primero.")
+            else:
+                with st.spinner("El Profesor está leyendo el documento y preparando la lección..."):
+                    # Extraer texto
+                    reader = PdfReader(io.BytesIO(pdf_subido.getvalue()))
+                    texto_pdf = "\n".join((pagina.extract_text() or "") for pagina in reader.pages)
+                    
+                    # Generar preguntas conversacionales con IA
+                    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.4, api_key=api_key)
+                    prompt = f"""
+                    Eres un profesor experto, amigable pero exigente. A partir del siguiente texto, genera una lista de 4 preguntas de examen abiertas y estimulantes para evaluar a un estudiante en forma de diálogo.
+                    Devuelve el resultado ÚNICAMENTE en formato JSON de lista de strings (ejemplo: ["Pregunta 1?", "Pregunta 2?"]):
+                    
+                    Texto:
+                    {texto_pdf[:10000]}
+                    """
+                    resp = llm.invoke(prompt)
+                    try:
+                        limpio = resp.content.replace("```json", "").replace("```", "").strip()
+                        preguntas = json.loads(limpio)
+                        st.session_state.preguntas_examen = preguntas
+                        st.session_state.indice_pregunta = 0
+                        st.session_state.historial_clase = []
+                        
+                        # Saludo inicial del profesor y primera pregunta
+                        primer_saludo = f"¡Hola! Toma asiento por favor. He leído detenidamente tu documento y hoy seré tu profesor personal. Vamos a ver qué tanto aprendiste. Comencemos con la primera pregunta:\n\n**{preguntas[0]}**"
+                        st.session_state.historial_clase.append(("profesor", primer_saludo))
+                        st.session_state.clase_iniciada = True
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al preparar las preguntas: {e}")
+
+    if st.session_state.clase_iniciada:
+        if st.button("🚪 Cambiar de Tema / Reiniciar Clase", use_container_width=True):
+            st.session_state.clase_iniciada = False
+            st.session_state.historial_clase = []
+            st.session_state.preguntas_examen = []
+            st.rerun()
 
     st.divider()
-    st.markdown(f"<p style='color:#444444 !important; font-size:0.75rem;'>QuizMaster Engine v2.0</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='color:#333333 !important; font-size:0.75rem;'>Aula Virtual v2.0 - Modo Interactivo</p>", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# HERO BANNER / ENCABEZADO
+# PANTALLA PRINCIPAL: EL SALÓN DE CLASES
 # ─────────────────────────────────────────────
 st.markdown("""
-<div class="hero-card">
-    <span class="badge-tag">🎓 Estudio Activo & Gamificado</span>
-    <h1 style="margin: 4px 0 10px 0; color: #FFFFFF !important; font-weight: 800;">QuizMaster: Tu Entrenador de Exámenes 🎯</h1>
-    <p style="font-size: 1.05rem; color: #CCCCCC !important; margin-bottom: 0px; line-height: 1.5;">
-        Sube las lecturas de tu clase. La inteligencia artificial creará un simulacro de examen personalizado para evaluar tus conocimientos antes de la prueba oficial.
+<div class="classroom-card" style="text-align: center; border-color: #00D18F;">
+    <span style="background-color: #00D18F; color: #000000; font-weight: 800; padding: 4px 14px; border-radius: 20px; font-size: 0.8rem; text-transform: uppercase;">👨‍🏫 Aula Interactiva en Vivo</span>
+    <h1 style="margin: 10px 0 5px 0; color: #FFFFFF !important; font-weight: 800;">Clase Magistral con el Profesor IA</h1>
+    <p style="font-size: 0.95rem; color: #CCCCCC !important; margin: 0;">
+        Responde a las preguntas del profesor en el chat inferior. Él evaluará tu respuesta, te dará retroalimentación y te hará la siguiente pregunta.
     </p>
 </div>
 """, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────
-# FUNCIONES DE PROCESAMIENTO Y GENERACIÓN DE QUIZ
-# ─────────────────────────────────────────────
-@st.cache_resource(show_spinner="Procesando documento...")
-def extraer_texto_pdf(pdf_bytes: bytes):
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    texto = "\n".join((pagina.extract_text() or "") for pagina in reader.pages)
-    return texto
-
-def generar_preguntas_quiz(texto: str, api_key: str):
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, api_key=api_key)
-    
-    prompt = f"""
-    A partir del siguiente texto de estudio, genera exactamente 5 preguntas de opción múltiple diseñadas para evaluar a un estudiante.
-    Devuelve la respuesta ÚNICAMENTE en formato JSON válido, sin bloques de código markdown adicionales (nada de ```json), con la siguiente estructura de lista:
-    [
-      {{
-        "pregunta": "Texto de la pregunta",
-        "opciones": ["Opción A", "Opción B", "Opción C", "Opción D"],
-        "respuesta_correcta": "Opción exacta que es correcta",
-        "explicacion": "Breve explicación de por qué es la respuesta correcta"
-      }}
-    ]
-
-    Texto de estudio:
-    {texto[:12000]}
-    """
-    
-    respuesta = llm.invoke(prompt)
-    try:
-        # Limpieza por si el modelo incluye marcas de código
-        texto_limpio = respuesta.content.replace("```json", "").replace("```", "").strip()
-        return json.loads(texto_limpio)
-    except Exception:
-        return []
-
-# ─────────────────────────────────────────────
-# LÓGICA PRINCIPAL DE LA VISTA
-# ─────────────────────────────────────────────
-if not api_key:
+if not st.session_state.clase_iniciada:
     st.markdown("""
-    <div class="study-card" style="text-align: center; padding: 40px;">
-        <h3 style="color: #00D18F !important;">🔒 Ingresa tu Clave de OpenAI</h3>
-        <p>Escribe tu clave en la barra lateral para activar tu simulador de exámenes.</p>
+    <div class="classroom-card" style="text-align: center; padding: 50px;">
+        <h3 style="color: #00D18F;">🚪 El salón está vacío</h3>
+        <p>Por favor, ingresa tu clave de OpenAI y sube un archivo PDF en la barra lateral izquierda, luego haz clic en <b>"¡Comenzar la Clase!"</b> para que el profesor te reciba.</p>
     </div>
     """, unsafe_allow_html=True)
-
-elif pdf is None:
-    st.markdown("""
-    <div class="study-card" style="text-align: center; padding: 40px;">
-        <h3 style="color: #00D18F !important;">📂 Sube tu PDF de Estudio</h3>
-        <p>Arrastra tu guía, lectura o documento de clase en la barra lateral para generar tu quiz personalizado.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
 else:
-    try:
-        texto_pdf = extraer_texto_pdf(pdf.getvalue())
-        
-        if not texto_pdf.strip():
-            st.error("El PDF no contiene texto legible.")
-            st.stop()
-
-        # Generar preguntas si aún no existen en la sesión
-        if not st.session_state.quiz_preguntas:
-            with st.spinner("🧠 Leyendo apuntes y diseñando el examen simulado..."):
-                st.session_state.quiz_preguntas = generar_preguntas_quiz(texto_pdf, api_key)
-        
-        preguntas = st.session_state.quiz_preguntas
-
-        if not preguntas:
-            st.error("No se pudieron generar preguntas a partir de este documento. Intenta con otro archivo.")
-            st.stop()
-
-        # Interfaz del Examen
-        st.markdown("""
-        <div class="study-card">
-            <h3 style="color: #00D18F !important; margin-top:0;">📝 Simulacro de Examen Activo</h3>
-            <p>Responde las siguientes preguntas basadas en tu documento. Al finalizar, califica tu desempeño.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        with st.form("form_quiz"):
-            for i, q in enumerate(preguntas):
-                st.markdown(f"#### **Pregunta {i+1}:** {q['pregunta']}")
-                
-                # Widget de selección
-                opcion_elegida = st.radio(
-                    f"Selecciona una opción (P{i+1})",
-                    q['opciones'],
-                    key=f"q_{i}",
-                    label_visibility="collapsed"
-                )
-                st.session_state.respuestas_usuario[i] = opcion_elegida
-                st.markdown("<hr style='border-color: #3E4D2F;'>", unsafe_allow_html=True)
-
-            enviar_quiz = st.form_submit_button("🚀 Evaluar Mis Respuestas", use_container_width=True)
-
-        if enviar_quiz:
-            st.session_state.quiz_enviado = True
-
-        # Mostrar resultados si ya se envió el quiz
-        if st.session_state.quiz_enviado:
-            puntaje = 0
-            st.markdown("---")
-            st.markdown("<h2 style='color: #00D18F;'>📊 Resultados de tu Evaluación</h2>", unsafe_allow_html=True)
-            
-            for i, q in enumerate(preguntas):
-                resp_usuario = st.session_state.respuestas_usuario.get(i)
-                es_correcta = (resp_usuario == q['respuesta_correcta'])
-                
-                if es_correcta:
-                    puntaje += 1
-                    icono = "✅"
-                    color_borde = "#00D18F"
-                else:
-                    icono = "❌"
-                    color_borde = "#FF6B6B"
-
-                st.markdown(f"""
-                <div class="study-card" style="border-left: 5px solid {color_borde};">
-                    <p style="font-weight: 700; color: #FFFFFF;">Pregunta {i+1}: {q['pregunta']}</p>
-                    <p>Tu respuesta: <b>{resp_usuario}</b> {icono}</p>
-                    <p>Respuesta correcta: <b>{q['respuesta_correcta']}</b></p>
-                    <p style="font-size: 0.9rem; color: #CCCCCC; font-style: italic;">💡 Explicación: {q['explicacion']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-
-            nota_final = (puntaje / len(preguntas)) * 100
+    # Mostrar el pizarron / historial de la conversación
+    for rol, mensaje in st.session_state.historial_clase:
+        if rol == "profesor":
             st.markdown(f"""
-            <div class="hero-card" style="text-align: center;">
-                <h2>Tu Calificación Final: {puntaje} / {len(preguntas)} ({nota_final}%)</h2>
-                <p>{'🎉 ¡Excelente trabajo, estás listo para el examen!' if nota_final >= 80 else '💡 ¡Buen intento! Repasa los conceptos marcados en rojo antes de la prueba.'}</p>
+            <div class="prof-bubble">
+                <b>👨‍🏫 Profesor IA:</b><br>{mensaje}
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class="student-bubble">
+                <b>🎓 Tú (Estudiante):</b><br>{mensaje}
             </div>
             """, unsafe_allow_html=True)
 
-    except Exception as e:
-        st.error(f"Ocurrió un error al procesar el examen: {e}")
+    # Si aún hay preguntas por hacer, mostrar el input de respuesta
+    idx_actual = st.session_state.indice_pregunta
+    total_preguntas = len(st.session_state.preguntas_examen)
+
+    if idx_actual < total_preguntas:
+        with st.form(key="form_respuesta_clase", clear_on_submit=True):
+            respuesta_estudiante = st.text_input("💬 Levanta la mano y responde al profesor:", placeholder="Escribe tu respuesta aquí...")
+            btn_enviar = st.form_submit_button("🙋‍♂️ Responder al Profesor", use_container_width=True)
+
+            if btn_enviar and respuesta_estudiante.strip():
+                # Agregar respuesta del estudiante al historial
+                st.session_state.historial_clase.append(("estudiante", respuesta_estudiante))
+                
+                # Evaluar con IA
+                llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, api_key=api_key)
+                pregunta_hecha = st.session_state.preguntas_examen[idx_actual]
+                
+                prompt_evaluacion = f"""
+                Estás actuando como un profesor en un aula evaluando a un estudiante.
+                Pregunta que hiciste: "{pregunta_hecha}"
+                Respuesta del estudiante: "{respuesta_estudiante}"
+                
+                Evalúa su respuesta de forma constructiva (indícale si está bien, qué le faltó, corrígele si hay errores).
+                Sé conversacional, cercano y motivador. 
+                """
+                
+                with st.spinner("El Profesor está evaluando tu respuesta..."):
+                    evaluacion = llm.invoke(prompt_evaluacion).content
+                
+                # Avanzar índice
+                st.session_state.indice_pregunta += 1
+                nuevo_idx = st.session_state.indice_pregunta
+                
+                if nuevo_idx < total_preguntas:
+                    siguiente_pregunta = st.session_state.preguntas_examen[nuevo_idx]
+                    respuesta_profesor = f"{evaluacion}\n\n--- \nPasemos a la siguiente cuestión:\n\n**{siguiente_pregunta}**"
+                else:
+                    respuesta_profesor = f"{evaluacion}\n\n🎉 **¡Clase terminada!** Has respondido todas las preguntas de la lección. ¡Excelente esfuerzo hoy, puedes descansar o reiniciar con otro documento!"
+                
+                st.session_state.historial_clase.append(("profesor", respuesta_profesor))
+                st.rerun()
+    else:
+        st.markdown("""
+        <div class="classroom-card" style="text-align: center; background: #2e3b24 !important; border-color: #00D18F;">
+            <h3 style="color: #00D18F;">🌟 ¡Lección Concluida con Éxito!</h3>
+            <p>Has completado todo el cuestionario oral del profesor. Usa el botón de la barra lateral si deseas estudiar otro documento.</p>
+        </div>
+        """, unsafe_allow_html=True)
